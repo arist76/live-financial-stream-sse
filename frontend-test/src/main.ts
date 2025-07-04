@@ -1,4 +1,4 @@
-'''import './style.css';
+import './style.css';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div>
@@ -21,4 +21,3 @@ eventSource.onmessage = (event) => {
 eventSource.onerror = (err) => {
   console.error("EventSource failed:", err);
 };
-''

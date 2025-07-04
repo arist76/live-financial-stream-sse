@@ -2,7 +2,14 @@ use std::{convert::Infallible, net::SocketAddr, pin::Pin, time::Duration};
 
 use futures_util::Stream;
 use http_body_util::StreamBody;
-use hyper::{body::Bytes, body::Frame, server::conn::http1, service::service_fn, Request, Response};
+use hyper::{
+    body::{Bytes, Frame},
+    server::conn::http1,
+    service::service_fn,
+    Method,
+    Request,
+    Response,
+};
 use hyper_util::rt::TokioIo;
 use serde::Serialize;
 use tokio::{net::TcpListener, sync::broadcast};
@@ -28,21 +35,32 @@ async fn fetch_stock_data(symbol: &str) -> Result<StockQuote, Box<dyn std::error
 }
 
 async fn handle_request(
-    _req: Request<hyper::body::Incoming>,
+    req: Request<hyper::body::Incoming>,
     tx: broadcast::Sender<StockQuote>,
 ) -> Result<Response<StreamBody<Pin<Box<dyn Stream<Item = Result<Frame<Bytes>, Infallible>> + Send>>>>, Infallible> {
+    let response_builder = Response::builder()
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        .header("Access-Control-Allow-Headers", "Content-Type");
+
+    if req.method() == Method::OPTIONS {
+        let empty_stream: Pin<Box<dyn Stream<Item = Result<Frame<Bytes>, Infallible>> + Send>> = Box::pin(futures_util::stream::empty());
+        let response = response_builder
+            .body(StreamBody::new(empty_stream))
+            .unwrap();
+        return Ok(response);
+    }
+
     let rx = tx.subscribe();
     let stream = BroadcastStream::new(rx)
         .filter_map(|item| item.ok())
         .map(|quote| {
             let data = serde_json::to_string(&quote).unwrap();
-            let event = format!("data: {}
-
-", data);
+            let event = format!("data: {}\n\n", data);
             Ok(Frame::data(Bytes::from(event)))
         });
 
-    let response = Response::builder()
+    let response = response_builder
         .header("Content-Type", "text/event-stream")
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive")
@@ -90,7 +108,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await
             {
-                eprintln!("Error serving connection: {:?}", err);
+                if !err.to_string().contains("IncompleteMessage") {
+                    eprintln!("Error serving connection: {:?}", err);
+                }
             }
         });
     }
